@@ -1,0 +1,40 @@
+#:kivy 2.0.0
+
+<Game>:
+    button: button_connect
+
+    Button:
+        pos: root.width * 0.5 - 40, root.height * 0.9 - 15
+        size: 80, 30
+        text: 'Connect'
+        on_press: root.connect()
+        id: button_connect
+
+    RelativeLayout:
+        size: root.width, root.height
+        pos: 0, 0
+
+        canvas.before:
+            Color:
+                rgba: 1, 1, 1, 0.3
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+<Bacteria>:
+    canvas:
+        Color:
+            hsv: self.hue, 1, 1
+
+        Ellipse:
+            pos: self.pos
+            size: self.size
+
+
+<HorizontalLine>:
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, 0.4
+        Rectangle:
+            pos: self.pos
+            size: self.width, 2
