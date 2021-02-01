@@ -1,17 +1,21 @@
-from asyncio import sleep, run, create_task, get_running_loop
+from asyncio import sleep, run, create_task, Lock
 from enum import IntEnum
+from math import ceil
 from random import random
+from typing import Callable
 
+from agar_core.game import GameStatus
+from agar_core.network.client import UDPClient
+from agar_core.network.message import Message, MessageType
+from agar_core.universe import MAGNIFICATION
+from agar_core.utils import run_forever
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.core.window.window_sdl2 import WindowSDL
 from kivy.properties import ObjectProperty, ObservableList, NumericProperty
 from kivy.uix.widget import Widget
 
-from agar_core.network.client import UDPClient
-from agar_core.network.message import Message, MessageType
-from agar_core.universe import Universe
-from agar_core.utils import run_forever
+DISTANCE_SCALE = 1 / 20
 
 
 class ArrowKey(IntEnum):
@@ -33,18 +37,117 @@ class VerticalLine(Widget):
     pass
 
 
+class GameStore:
+    def __init__(self):
+        self.player_id = ""
+        self.positions: dict[str, tuple[int, int]] = {}
+        self.speed_percentage = [0, 0]
+        self.game_status: GameStatus = GameStatus()
+        self._actual_position = (0, 0)
+        self._previous_position = (0, 0)
+
+    @property
+    def actual_position(self) -> tuple[int, int]:
+        return self._actual_position
+
+    @property
+    def speed_vector(self) -> tuple:
+        actual_position = self.actual_position
+        return (
+            actual_position[0] - self._previous_position[0],
+            actual_position[1] - self._previous_position[1],
+        )
+
+    def update_game_status(self, game_status: GameStatus):
+        self._previous_position = self.actual_position
+        self.game_status = game_status
+        self._actual_position = game_status.bacterias[self.player_id].position
+
+
+class BacteriaCollection(Widget):
+    def __init__(self, game_store: GameStore, **kwargs):
+        super().__init__(**kwargs)
+        self._game_store = game_store
+        self._bacterias: dict[str, Bacteria] = {}
+
+    def update(self):
+        window: WindowSDL = Window
+        for id_, bacteria in self._game_store.game_status.bacterias.items():
+            if id_ == self._game_store.player_id:
+                continue
+
+            bacteria_widget = self._bacterias.get(id_)
+            relative_position = (
+                bacteria.position[0] - self._game_store.actual_position[0],
+                bacteria.position[1] - self._game_store.actual_position[1],
+            )
+
+            pos = [window.size[0] / 2, window.size[1] / 2]
+            pos[0] += relative_position[0] * MAGNIFICATION * DISTANCE_SCALE
+            pos[1] += relative_position[1] * MAGNIFICATION * DISTANCE_SCALE
+
+            print(pos)
+            if bacteria_widget:
+                bacteria_widget.pos = pos
+                continue
+
+            bacteria_widget = Bacteria(pos=pos, size=[20, 20], hue=random())
+            self.add_widget(bacteria_widget)
+            self._bacterias[id_] = bacteria_widget
+
+
 class Grid(Widget):
-    def __init__(self, **kwargs):
+    LINE_SPACING = 150
+
+    def __init__(self, game_store: GameStore, **kwargs):
         super().__init__(**kwargs)
         window: WindowSDL = Window
         window.bind(on_resize=self.on_resize)
         self.size = window.size
-        self._line = HorizontalLine(y=round(self.width / 2), size=[self.width, 2])
-        self.add_widget(self._line)
+
+        self._virtual_size = self.size
+        self._vertical_lines = []
+        self._horizontal_lines = []
+        self._game_store = game_store
+        self._init_lines()
 
     def on_resize(self, window: WindowSDL, width: int, height: int):
         self.size = window.size
-        self._line.size = [self.width, 2]
+        for line in self._horizontal_lines + self._vertical_lines:
+            self.remove_widget(line)
+
+        self._vertical_lines = []
+        self._horizontal_lines = []
+
+        self._init_lines()
+
+    def update(self):
+        vector = self._game_store.speed_vector
+
+        for line in self._vertical_lines:
+            line.x = (line.x - (vector[0] * 10 ** 5)) % self._virtual_size[0]
+
+        for line in self._horizontal_lines:
+            line.y = (line.y - (vector[1] * 10 ** 5)) % self._virtual_size[1]
+
+    def _init_lines(self):
+        self._virtual_size = [
+            ceil(self.width / self.LINE_SPACING) * self.LINE_SPACING,
+            ceil(self.height / self.LINE_SPACING) * self.LINE_SPACING,
+        ]
+
+        self._horizontal_lines = [
+            HorizontalLine(y=y, size=[self.width, 2])
+            for y in range(0, self.height, self.LINE_SPACING)
+        ]
+
+        self._vertical_lines = [
+            VerticalLine(x=x, size=[2, self.height])
+            for x in range(0, self.width, self.LINE_SPACING)
+        ]
+
+        for line in self._horizontal_lines + self._vertical_lines:
+            self.add_widget(line)
 
 
 class Game(Widget):
@@ -54,66 +157,61 @@ class Game(Widget):
         super().__init__(**kwargs)
         window: WindowSDL = Window
         window.bind(on_key_down=self.on_key_down)
-        self.add_widget(Grid())
+        window.bind(on_resize=self.on_resize)
 
-        self._loop = get_running_loop()
+        self._lock = Lock()
+        self._game_store = GameStore()
+        self._grid = Grid(self._game_store)
+        self._bacteria_collection = BacteriaCollection(self._game_store)
+        self.add_widget(self._grid)
+        self.add_widget(self._bacteria_collection)
+
         self._client: UDPClient = ...
-        self._position = [0, 0]
-        self._positions: dict[str, tuple[int, int]] = {}
 
-        self._speed = [0, 0]
-        self._bacteria = Bacteria(pos=self._position, size=[20, 20], hue=0.5)
-        self._bacterias: dict[str, Bacteria] = {}
+        self._bacteria = Bacteria(pos=[round(window.size[0] / 2), round(window.size[1] / 2)], size=[20, 20], hue=0.5)
+
+        self._message_handlers: dict[MessageType, Callable[[Message], ...]] = {
+            MessageType.GAME_STATUS_UPDATE: self._handle_game_status_update,
+            MessageType.CONNECT: self._handle_connect,
+        }
 
         self.add_widget(self._bacteria)
 
+    def on_resize(self, window: WindowSDL, width: int, height: int):
+        self._bacteria.pos = [round(window.size[0] / 2), round(window.size[1] / 2)]
+
     async def update(self):
-        center_x = round(self.width / 2)
-        center_y = round(self.height / 2)
+        async with self._lock:
+            await self._update()
 
-        self._bacteria.pos = [
-            center_x + self._position[0] * Universe.DISTANCE_SCALE,
-            center_y + self._position[1] * Universe.DISTANCE_SCALE
-        ]
-
-        for id_, position in self._positions.items():
-            if id_ == self._client.player_id:
-                continue
-
-            bacteria_widget = self._bacterias.get(id_)
-            pos = [
-                center_x + position[0] * Universe.DISTANCE_SCALE,
-                center_y + position[1] * Universe.DISTANCE_SCALE
-            ]
-
-            if bacteria_widget:
-                bacteria_widget.pos = pos
-                continue
-
-            bacteria_widget = Bacteria(pos=pos, size=[20, 20], hue=random())
-            self.add_widget(bacteria_widget)
-            self._bacterias[id_] = bacteria_widget
+    async def _update(self):
+        self._grid.update()
+        self._bacteria_collection.update()
 
     def connect(self):
-        self._loop.create_task(self._connect())
+        create_task(self._connect())
 
     def on_key_down(self, window: WindowSDL, keyboard: int, keycode: int, something, observables: ObservableList):
         if self._client is ... or not self._client.player_id:
             return
 
-        key = ArrowKey(keycode)
+        try:
+            key = ArrowKey(keycode)
+        except ValueError:
+            return
+
+        speed = self._game_store.speed_percentage
 
         if key == ArrowKey.UP:
-            self._speed[1] = min([Universe.MAX_SPEED_PERCENT, self._speed[1] + 1])
+            speed[1] = min([1, speed[1] + 0.1])
         elif key == ArrowKey.DOWN:
-            self._speed[1] = max([-Universe.MAX_SPEED_PERCENT, self._speed[1] - 1])
+            speed[1] = max([-1, speed[1] - 0.1])
         elif key == ArrowKey.LEFT:
-            self._speed[0] = max([-Universe.MAX_SPEED_PERCENT, self._speed[0] - 1])
+            speed[0] = max([-1, speed[0] - 0.1])
         elif key == ArrowKey.RIGHT:
-            self._speed[0] = min([Universe.MAX_SPEED_PERCENT, self._speed[0] + 1])
+            speed[0] = min([1, speed[0] + 0.1])
 
-        self._client.change_speed((self._speed[0], self._speed[1]))
-        print(self._speed)
+        self._client.change_speed((speed[0], speed[1]))
 
     async def _connect(self):
         self._client = UDPClient(
@@ -127,24 +225,28 @@ class Game(Widget):
         self.remove_widget(self.button)
 
     async def _handle_message(self, message: Message):
-        if message.type == MessageType.GAME_STATUS_UPDATE:
-            if not self._client.player_id:
-                return
+        handler = self._message_handlers.get(message.type)
+        if handler:
+            await handler(message)
 
-            self._game_status = message.game_status
-            self._position = message.game_status.bacterias[self._client.player_id].position
+    async def _handle_game_status_update(self, message: Message):
+        if not self._client.player_id:
+            return
 
-            for bacteria in self._game_status.bacterias.values():
-                if bacteria.id == self._client.player_id:
-                    continue
+        if self._lock.locked():
+            return
 
-                self._positions[bacteria.id] = bacteria.position
+        async with self._lock:
+            self._game_store.update_game_status(message.game_status)
+
+    async def _handle_connect(self, message: Message):
+        self._game_store.player_id = message.bacteria_id
 
 
 class AgarApp(App):
     def build(self):
         game = Game()
-        refresh_frequency = 1 / 100
+        refresh_frequency = 1 / 60
 
         @run_forever
         async def update_game():
