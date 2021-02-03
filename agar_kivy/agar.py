@@ -1,7 +1,7 @@
 from asyncio import sleep, run, create_task, Lock
 from enum import IntEnum
 from math import ceil
-from typing import Callable
+from typing import Callable, Optional
 
 from agar_core.game import GameStatus
 from agar_core.network.client import UDPClient
@@ -43,32 +43,14 @@ class GameStore:
         self.speed_percentage = [0, 0]
         self.game_status: GameStatus = GameStatus()
 
-        self._actual_position = (0, 0)
-        self._previous_position = (0, 0)
-
     @property
-    def actual_position(self) -> tuple[int, int]:
-        return self._actual_position
-
-    @property
-    def speed_vector(self) -> tuple:
-        actual_position = self.actual_position
-        return (
-            actual_position[0] - self._previous_position[0],
-            actual_position[1] - self._previous_position[1],
-        )
+    def actual_position(self) -> Optional[tuple[int, int]]:
+        bacteria = self.game_status.bacterias.get(self.player_id)
+        return bacteria.position if bacteria else None
 
     @property
     def view_distance(self) -> float:
         return self.game_status.bacterias[self.player_id].radius * VIEW_DISTANCE_MODIFIER
-
-    def update_speed_vector(self):
-        bacteria = self.game_status.bacterias.get(self.player_id)
-        if not bacteria:
-            return
-
-        self._previous_position = self.actual_position
-        self._actual_position = bacteria.position
 
     def update_game_status(self, game_status: GameStatus):
         self.game_status = game_status
@@ -119,6 +101,8 @@ class Grid(Widget):
         self._vertical_lines = []
         self._horizontal_lines = []
         self._game_store = game_store
+        self._actual_position = (0, 0)
+        self._previous_position = (0, 0)
         self._init_lines()
 
     def on_resize(self, window: WindowSDL, width: int, height: int):
@@ -132,7 +116,14 @@ class Grid(Widget):
         self._init_lines()
 
     def update(self):
-        vector = self._game_store.speed_vector
+        self._previous_position = self._actual_position
+        self._actual_position = self._game_store.actual_position
+
+        vector = (
+            self._actual_position[0] - self._previous_position[0],
+            self._actual_position[1] - self._previous_position[1],
+        )
+
         for line in self._vertical_lines:
             line.x = (line.x - (vector[0] * SCALE)) % self._virtual_size[0]
 
@@ -198,16 +189,12 @@ class Game(Widget):
             await self._update()
 
     async def _update(self):
-        self._game_store.update_speed_vector()
+        if not self._game_store.actual_position:
+            return
 
         self._grid.update()
         self._bacteria_collection.update()
-
         my_bacteria = self._game_store.game_status.bacterias.get(self._game_store.player_id)
-
-        if not my_bacteria:
-            return
-
         radius = my_bacteria.radius * SCALE
         self._bacteria.size = (radius, radius)
         self._bacteria.hue = my_bacteria.hsv[0]
