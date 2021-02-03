@@ -1,13 +1,11 @@
 from asyncio import sleep, run, create_task, Lock
 from enum import IntEnum
 from math import ceil
-from random import random
 from typing import Callable
 
 from agar_core.game import GameStatus
 from agar_core.network.client import UDPClient
 from agar_core.network.message import Message, MessageType
-from agar_core.universe import MAGNIFICATION
 from agar_core.utils import run_forever
 from kivy.app import App
 from kivy.core.window import Window
@@ -15,7 +13,8 @@ from kivy.core.window.window_sdl2 import WindowSDL
 from kivy.properties import ObjectProperty, ObservableList, NumericProperty
 from kivy.uix.widget import Widget
 
-DISTANCE_SCALE = 1 / 20
+SCALE = 60
+VIEW_DISTANCE_MODIFIER = 40
 
 
 class ArrowKey(IntEnum):
@@ -43,6 +42,7 @@ class GameStore:
         self.positions: dict[str, tuple[int, int]] = {}
         self.speed_percentage = [0, 0]
         self.game_status: GameStatus = GameStatus()
+
         self._actual_position = (0, 0)
         self._previous_position = (0, 0)
 
@@ -58,10 +58,20 @@ class GameStore:
             actual_position[1] - self._previous_position[1],
         )
 
-    def update_game_status(self, game_status: GameStatus):
+    @property
+    def view_distance(self) -> float:
+        return self.game_status.bacterias[self.player_id].radius * VIEW_DISTANCE_MODIFIER
+
+    def update_speed_vector(self):
+        bacteria = self.game_status.bacterias.get(self.player_id)
+        if not bacteria:
+            return
+
         self._previous_position = self.actual_position
+        self._actual_position = bacteria.position
+
+    def update_game_status(self, game_status: GameStatus):
         self.game_status = game_status
-        self._actual_position = game_status.bacterias[self.player_id].position
 
 
 class BacteriaCollection(Widget):
@@ -83,15 +93,15 @@ class BacteriaCollection(Widget):
             )
 
             pos = [window.size[0] / 2, window.size[1] / 2]
-            pos[0] += relative_position[0] * MAGNIFICATION * DISTANCE_SCALE
-            pos[1] += relative_position[1] * MAGNIFICATION * DISTANCE_SCALE
+            pos[0] += relative_position[0] * SCALE
+            pos[1] += relative_position[1] * SCALE
 
-            print(pos)
             if bacteria_widget:
                 bacteria_widget.pos = pos
                 continue
 
-            bacteria_widget = Bacteria(pos=pos, size=[20, 20], hue=random())
+            radius = bacteria.radius * SCALE
+            bacteria_widget = Bacteria(pos=pos, size=[radius, radius], hue=bacteria.hsv[0])
             self.add_widget(bacteria_widget)
             self._bacterias[id_] = bacteria_widget
 
@@ -123,12 +133,11 @@ class Grid(Widget):
 
     def update(self):
         vector = self._game_store.speed_vector
-
         for line in self._vertical_lines:
-            line.x = (line.x - (vector[0] * 10 ** 5)) % self._virtual_size[0]
+            line.x = (line.x - (vector[0] * SCALE)) % self._virtual_size[0]
 
         for line in self._horizontal_lines:
-            line.y = (line.y - (vector[1] * 10 ** 5)) % self._virtual_size[1]
+            line.y = (line.y - (vector[1] * SCALE)) % self._virtual_size[1]
 
     def _init_lines(self):
         self._virtual_size = [
@@ -168,7 +177,11 @@ class Game(Widget):
 
         self._client: UDPClient = ...
 
-        self._bacteria = Bacteria(pos=[round(window.size[0] / 2), round(window.size[1] / 2)], size=[20, 20], hue=0.5)
+        self._bacteria = Bacteria(
+            pos=[round(window.size[0] / 2), round(window.size[1] / 2)],
+            size=[30, 30],
+            hue=0.5
+        )
 
         self._message_handlers: dict[MessageType, Callable[[Message], ...]] = {
             MessageType.GAME_STATUS_UPDATE: self._handle_game_status_update,
@@ -185,8 +198,19 @@ class Game(Widget):
             await self._update()
 
     async def _update(self):
+        self._game_store.update_speed_vector()
+
         self._grid.update()
         self._bacteria_collection.update()
+
+        my_bacteria = self._game_store.game_status.bacterias.get(self._game_store.player_id)
+
+        if not my_bacteria:
+            return
+
+        radius = my_bacteria.radius * SCALE
+        self._bacteria.size = (radius, radius)
+        self._bacteria.hue = my_bacteria.hsv[0]
 
     def connect(self):
         create_task(self._connect())
