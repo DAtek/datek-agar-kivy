@@ -3,9 +3,10 @@ from enum import IntEnum
 from math import ceil
 from typing import Callable, Optional
 
-from agar_core.game import GameStatus
+from agar_core.game import GameStatus, Organism
 from agar_core.network.client import UDPClient
 from agar_core.network.message import Message, MessageType
+from agar_core.universe import Universe
 from agar_core.utils import run_forever
 from kivy.app import App
 from kivy.core.window import Window
@@ -36,12 +37,16 @@ class VerticalLine(Widget):
     pass
 
 
+_window: WindowSDL = Window
+
+
 class GameStore:
     def __init__(self):
         self.player_id = ""
         self.positions: dict[str, tuple[int, int]] = {}
         self.speed_percentage = [0, 0]
         self.game_status: GameStatus = GameStatus()
+        self.universe: Universe = ...
 
     @property
     def actual_position(self) -> Optional[tuple[int, int]]:
@@ -56,36 +61,50 @@ class GameStore:
         self.game_status = game_status
 
 
-class BacteriaCollection(Widget):
+class OrganismCollection(Widget):
     def __init__(self, game_store: GameStore, **kwargs):
         super().__init__(**kwargs)
         self._game_store = game_store
-        self._bacterias: dict[str, Bacteria] = {}
+        self._organisms: dict[str, Bacteria] = {}
 
     def update(self):
-        window: WindowSDL = Window
-        for id_, bacteria in self._game_store.game_status.bacterias.items():
-            if id_ == self._game_store.player_id:
+        for bacteria in self._game_store.game_status.bacterias.values():
+            if bacteria.id == self._game_store.player_id:
                 continue
 
-            bacteria_widget = self._bacterias.get(id_)
-            relative_position = (
-                bacteria.position[0] - self._game_store.actual_position[0],
-                bacteria.position[1] - self._game_store.actual_position[1],
-            )
+            self._update_organism(bacteria)
 
-            pos = [window.size[0] / 2, window.size[1] / 2]
-            pos[0] += relative_position[0] * SCALE
-            pos[1] += relative_position[1] * SCALE
+        for organism in self._game_store.game_status.organisms:
+            self._update_organism(organism)
 
-            if bacteria_widget:
-                bacteria_widget.pos = pos
-                continue
+    def _update_organism(self, organism: Organism):
+        relative_position = self._game_store.universe.calculate_position_vector(
+            o=self._game_store.actual_position,
+            p=organism.position,
+        )
 
-            radius = bacteria.radius * SCALE
-            bacteria_widget = Bacteria(pos=pos, size=[radius, radius], hue=bacteria.hsv[0])
-            self.add_widget(bacteria_widget)
-            self._bacterias[id_] = bacteria_widget
+        pos = [_window.size[0] / 2, _window.size[1] / 2]
+        pos[0] += relative_position[0] * SCALE
+        pos[1] += relative_position[1] * SCALE
+        organism_widget = self._organisms.get(organism.id)
+
+        if pos[0] > _window.size[0] or pos[1] > _window.size[1]:
+            if not organism_widget:
+                return
+
+            self.remove_widget(organism_widget)
+            del self._organisms[organism.id]
+            return
+
+        if organism_widget:
+            organism_widget.pos = pos
+            return
+
+        hsv = getattr(organism, "hsv", [0.4])
+        radius = organism.radius * SCALE
+        organism_widget = Bacteria(pos=pos, size=[radius, radius], hue=hsv[0])
+        self.add_widget(organism_widget)
+        self._organisms[organism.id] = organism_widget
 
 
 class Grid(Widget):
@@ -93,9 +112,8 @@ class Grid(Widget):
 
     def __init__(self, game_store: GameStore, **kwargs):
         super().__init__(**kwargs)
-        window: WindowSDL = Window
-        window.bind(on_resize=self.on_resize)
-        self.size = window.size
+        _window.bind(on_resize=self.on_resize)
+        self.size = _window.size
 
         self._virtual_size = self.size
         self._vertical_lines = []
@@ -155,21 +173,20 @@ class Game(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        window: WindowSDL = Window
-        window.bind(on_key_down=self.on_key_down)
-        window.bind(on_resize=self.on_resize)
+        _window.bind(on_key_down=self.on_key_down)
+        _window.bind(on_resize=self.on_resize)
 
         self._lock = Lock()
         self._game_store = GameStore()
         self._grid = Grid(self._game_store)
-        self._bacteria_collection = BacteriaCollection(self._game_store)
+        self._organism_collection = OrganismCollection(self._game_store)
         self.add_widget(self._grid)
-        self.add_widget(self._bacteria_collection)
+        self.add_widget(self._organism_collection)
 
         self._client: UDPClient = ...
 
         self._bacteria = Bacteria(
-            pos=[round(window.size[0] / 2), round(window.size[1] / 2)],
+            pos=[round(_window.size[0] / 2), round(_window.size[1] / 2)],
             size=[30, 30],
             hue=0.5
         )
@@ -193,7 +210,7 @@ class Game(Widget):
             return
 
         self._grid.update()
-        self._bacteria_collection.update()
+        self._organism_collection.update()
         my_bacteria = self._game_store.game_status.bacterias.get(self._game_store.player_id)
         radius = my_bacteria.radius * SCALE
         self._bacteria.size = (radius, radius)
@@ -252,12 +269,16 @@ class Game(Widget):
 
     async def _handle_connect(self, message: Message):
         self._game_store.player_id = message.bacteria_id
+        self._game_store.universe = Universe(
+            world_size=message.world_size,
+            total_nutrient=message.total_nutrient,
+        )
 
 
 class AgarApp(App):
     def build(self):
         game = Game()
-        refresh_frequency = 1 / 60
+        refresh_frequency = 1 / 35
 
         @run_forever
         async def update_game():
