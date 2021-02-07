@@ -3,6 +3,7 @@ from enum import IntEnum
 from math import ceil
 from typing import Callable, Optional
 
+import numpy as np
 from agar_core.game import GameStatus, Organism
 from agar_core.network.client import UDPClient
 from agar_core.network.message import Message, MessageType
@@ -28,6 +29,19 @@ class ArrowKey(IntEnum):
 class Bacteria(Widget):
     hue = NumericProperty(0.5)
 
+    def __init__(self, **kwargs):
+        pos = kwargs["pos"]
+        size = kwargs["size"]
+
+        pos = [
+            pos[0] - size[0],
+            pos[1] - size[1],
+        ]
+
+        kwargs["pos"] = pos
+        kwargs["size"] = size
+        super().__init__(**kwargs)
+
 
 class HorizontalLine(Widget):
     pass
@@ -43,13 +57,13 @@ _window: WindowSDL = Window
 class GameStore:
     def __init__(self):
         self.player_id = ""
-        self.positions: dict[str, tuple[int, int]] = {}
+        self.positions: dict[str, np.ndarray] = {}
         self.speed_percentage = [0, 0]
         self.game_status: GameStatus = GameStatus()
         self.universe: Universe = ...
 
     @property
-    def actual_position(self) -> Optional[tuple[int, int]]:
+    def actual_position(self) -> Optional[np.ndarray]:
         bacteria = self.game_status.bacterias.get(self.player_id)
         return bacteria.position if bacteria else None
 
@@ -66,45 +80,72 @@ class OrganismCollection(Widget):
         super().__init__(**kwargs)
         self._game_store = game_store
         self._organisms: dict[str, Bacteria] = {}
+        self._organism_positions = []
+        self._id_position_map = {}
+        self._total_organism_collection = {}
+        self._vector_array: np.ndarray = ...
+        self._position_array: np.ndarray = ...
 
     def update(self):
-        for bacteria in self._game_store.game_status.bacterias.values():
-            if bacteria.id == self._game_store.player_id:
-                continue
+        self._organism_positions = []
+        self._id_position_map = {}
 
-            self._update_organism(bacteria)
+        for bacteria in self._game_store.game_status.bacterias.values():
+            if bacteria.id != self._game_store.player_id:
+                self._register_organism(bacteria)
 
         for organism in self._game_store.game_status.organisms:
-            self._update_organism(organism)
+            self._register_organism(organism)
 
-    def _update_organism(self, organism: Organism):
-        relative_position = self._game_store.universe.calculate_position_vector(
-            o=self._game_store.actual_position,
-            p=organism.position,
+        if not self._organism_positions:
+            return
+
+        organism_positions = np.array(self._organism_positions, np.float32)
+        origo_position = self._game_store.game_status.bacterias[self._game_store.player_id].position
+        origo_array = np.ndarray(organism_positions.shape, np.float32)
+        origo_array[:] = [origo_position[0], origo_position[1]]
+
+        self._vector_array = self._game_store.universe.calculate_position_vector_array(
+            origo_array,
+            organism_positions
         )
 
-        pos = [_window.size[0] / 2, _window.size[1] / 2]
-        pos[0] += relative_position[0] * SCALE
-        pos[1] += relative_position[1] * SCALE
-        organism_widget = self._organisms.get(organism.id)
+        self._position_array = np.ndarray(organism_positions.shape, np.float32)
+        self._position_array[:] = np.array(_window.size, np.float32) / 2
+        self._position_array += self._vector_array * SCALE
+
+        for id_ in self._id_position_map.keys():
+            self._update_organism(id_)
+
+    def _register_organism(self, organism: Organism):
+        self._total_organism_collection[organism.id] = organism
+        self._organism_positions.append(organism.position)
+        self._id_position_map[organism.id] = len(self._organism_positions) - 1
+
+    def _update_organism(self, organism_id):
+        organism_widget = self._organisms.get(organism_id)
+        index = self._id_position_map[organism_id]
+        pos = self._position_array[index]
+        pos = [int(pos[0]), int(pos[1])]
 
         if pos[0] > _window.size[0] or pos[1] > _window.size[1]:
             if not organism_widget:
                 return
 
             self.remove_widget(organism_widget)
-            del self._organisms[organism.id]
+            del self._organisms[organism_id]
             return
 
         if organism_widget:
             organism_widget.pos = pos
             return
 
+        organism = self._total_organism_collection[organism_id]
         hsv = getattr(organism, "hsv", [0.4])
         radius = organism.radius * SCALE
         organism_widget = Bacteria(pos=pos, size=[radius, radius], hue=hsv[0])
         self.add_widget(organism_widget)
-        self._organisms[organism.id] = organism_widget
+        self._organisms[organism_id] = organism_widget
 
 
 class Grid(Widget):
@@ -119,9 +160,10 @@ class Grid(Widget):
         self._vertical_lines = []
         self._horizontal_lines = []
         self._game_store = game_store
-        self._actual_position = (0, 0)
-        self._previous_position = (0, 0)
+        self._actual_position = np.zeros(2, np.float32)
+        self._previous_position = np.zeros(2, np.float32)
         self._init_lines()
+        self._vector = np.zeros(2, np.float32)
 
     def on_resize(self, window: WindowSDL, width: int, height: int):
         self.size = window.size
@@ -136,17 +178,26 @@ class Grid(Widget):
     def update(self):
         self._previous_position = self._actual_position
         self._actual_position = self._game_store.actual_position
+        vector = self._game_store.universe.calculate_position_vector_array(
+            self._previous_position,
+            self._actual_position
+        ) * SCALE
 
-        vector = (
-            self._actual_position[0] - self._previous_position[0],
-            self._actual_position[1] - self._previous_position[1],
-        )
+        self._vector += vector
 
-        for line in self._vertical_lines:
-            line.x = (line.x - (vector[0] * SCALE)) % self._virtual_size[0]
+        if abs(self._vector[0]) >= 1:
+            rounded = round(self._vector[0])
+            for line in self._vertical_lines:
+                line.x = (line.x - rounded) % self._virtual_size[0]
 
-        for line in self._horizontal_lines:
-            line.y = (line.y - (vector[1] * SCALE)) % self._virtual_size[1]
+            self._vector[0] -= rounded
+
+        if abs(self._vector[1]) >= 1:
+            rounded = round(self._vector[1])
+            for line in self._horizontal_lines:
+                line.y = (line.y - rounded) % self._virtual_size[1]
+
+            self._vector[1] -= rounded
 
     def _init_lines(self):
         self._virtual_size = [
@@ -206,7 +257,7 @@ class Game(Widget):
             await self._update()
 
     async def _update(self):
-        if not self._game_store.actual_position:
+        if self._game_store.actual_position is None:
             return
 
         self._grid.update()
@@ -250,7 +301,6 @@ class Game(Widget):
             player_name="Atti"
         )
         self._client.start()
-        self.remove_widget(self.button)
 
     async def _handle_message(self, message: Message):
         handler = self._message_handlers.get(message.type)
@@ -273,6 +323,7 @@ class Game(Widget):
             world_size=message.world_size,
             total_nutrient=message.total_nutrient,
         )
+        self.remove_widget(self.button)
 
 
 class AgarApp(App):
