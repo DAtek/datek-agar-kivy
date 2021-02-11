@@ -4,19 +4,17 @@ from math import ceil
 from typing import Callable, Optional
 
 import numpy as np
-from agar_core.game import GameStatus, Organism
+from agar_core.game import GameStatus, Organism, Bacteria as BacteriaModel
 from agar_core.network.client import UDPClient
 from agar_core.network.message import Message, MessageType
 from agar_core.universe import Universe
 from agar_core.utils import run_forever
+from agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_corrected_positions
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.core.window.window_sdl2 import WindowSDL
 from kivy.properties import ObjectProperty, ObservableList, NumericProperty
 from kivy.uix.widget import Widget
-
-SCALE = 60
-VIEW_DISTANCE_MODIFIER = 40
 
 
 class ArrowKey(IntEnum):
@@ -28,19 +26,6 @@ class ArrowKey(IntEnum):
 
 class Bacteria(Widget):
     hue = NumericProperty(0.5)
-
-    def __init__(self, **kwargs):
-        pos = kwargs["pos"]
-        size = kwargs["size"]
-
-        pos = [
-            pos[0] - size[0],
-            pos[1] - size[1],
-        ]
-
-        kwargs["pos"] = pos
-        kwargs["size"] = size
-        super().__init__(**kwargs)
 
 
 class HorizontalLine(Widget):
@@ -56,7 +41,7 @@ _window: WindowSDL = Window
 
 class GameStore:
     def __init__(self):
-        self.player_id = ""
+        self.player_id = 0
         self.positions: dict[str, np.ndarray] = {}
         self.speed_percentage = [0, 0]
         self.game_status: GameStatus = GameStatus()
@@ -64,12 +49,8 @@ class GameStore:
 
     @property
     def actual_position(self) -> Optional[np.ndarray]:
-        bacteria = self.game_status.bacterias.get(self.player_id)
+        bacteria = self.game_status.get_bacteria_by_id(self.player_id)
         return bacteria.position if bacteria else None
-
-    @property
-    def view_distance(self) -> float:
-        return self.game_status.bacterias[self.player_id].radius * VIEW_DISTANCE_MODIFIER
 
     def update_game_status(self, game_status: GameStatus):
         self.game_status = game_status
@@ -81,16 +62,19 @@ class OrganismCollection(Widget):
         self._game_store = game_store
         self._organisms: dict[str, Bacteria] = {}
         self._organism_positions = []
+        self._organism_radiuses = []
         self._id_position_map = {}
         self._total_organism_collection = {}
         self._vector_array: np.ndarray = ...
         self._position_array: np.ndarray = ...
+        self._organism_sizes: np.ndarray = ...
 
     def update(self):
         self._organism_positions = []
         self._id_position_map = {}
+        self._organism_radiuses = []
 
-        for bacteria in self._game_store.game_status.bacterias.values():
+        for bacteria in self._game_store.game_status.bacterias:
             if bacteria.id != self._game_store.player_id:
                 self._register_organism(bacteria)
 
@@ -101,18 +85,23 @@ class OrganismCollection(Widget):
             return
 
         organism_positions = np.array(self._organism_positions, np.float32)
-        origo_position = self._game_store.game_status.bacterias[self._game_store.player_id].position
-        origo_array = np.ndarray(organism_positions.shape, np.float32)
-        origo_array[:] = [origo_position[0], origo_position[1]]
+
+        origo_position = np.array(
+            self._game_store.game_status.get_bacteria_by_id(self._game_store.player_id).position,
+            np.float32
+        )
 
         self._vector_array = self._game_store.universe.calculate_position_vector_array(
-            origo_array,
+            origo_position,
             organism_positions
         )
 
         self._position_array = np.ndarray(organism_positions.shape, np.float32)
         self._position_array[:] = np.array(_window.size, np.float32) / 2
+        self._organism_radiuses = np.array(self._organism_radiuses, np.float32) * SCALE
+        self._organism_sizes = self._organism_radiuses * 2
         self._position_array += self._vector_array * SCALE
+        self._position_array = calculate_corrected_positions(self._position_array, self._organism_radiuses)
 
         for id_ in self._id_position_map.keys():
             self._update_organism(id_)
@@ -121,12 +110,13 @@ class OrganismCollection(Widget):
         self._total_organism_collection[organism.id] = organism
         self._organism_positions.append(organism.position)
         self._id_position_map[organism.id] = len(self._organism_positions) - 1
+        self._organism_radiuses.append(organism.radius)
 
     def _update_organism(self, organism_id):
         organism_widget = self._organisms.get(organism_id)
         index = self._id_position_map[organism_id]
         pos = self._position_array[index]
-        pos = [int(pos[0]), int(pos[1])]
+        pos = [round(pos[0]), round(pos[1])]
 
         if pos[0] > _window.size[0] or pos[1] > _window.size[1]:
             if not organism_widget:
@@ -141,9 +131,10 @@ class OrganismCollection(Widget):
             return
 
         organism = self._total_organism_collection[organism_id]
+
         hsv = getattr(organism, "hsv", [0.4])
-        radius = organism.radius * SCALE
-        organism_widget = Bacteria(pos=pos, size=[radius, radius], hue=hsv[0])
+        size = round(self._organism_sizes[index])
+        organism_widget = Bacteria(pos=pos, size=[size, size], hue=hsv[0])
         self.add_widget(organism_widget)
         self._organisms[organism_id] = organism_widget
 
@@ -235,10 +226,9 @@ class Game(Widget):
         self.add_widget(self._organism_collection)
 
         self._client: UDPClient = ...
-
         self._bacteria = Bacteria(
-            pos=[round(_window.size[0] / 2), round(_window.size[1] / 2)],
-            size=[30, 30],
+            pos=self.my_bacteria_position,
+            size=[INITIAL_SIZE, INITIAL_SIZE],
             hue=0.5
         )
 
@@ -249,8 +239,30 @@ class Game(Widget):
 
         self.add_widget(self._bacteria)
 
+    @property
+    def my_bacteria(self) -> Optional[BacteriaModel]:
+        return self._game_store.game_status.get_bacteria_by_id(self._game_store.player_id)
+
+    @property
+    def my_bacteria_position(self) -> tuple[int, int]:
+        center = _get_center()
+
+        if self._game_store.actual_position is None:
+            return center[0] + INITIAL_CORRECTION, center[1] + INITIAL_CORRECTION
+
+        correction = round(self.my_bacteria_size / 2)
+
+        return (
+            center[0] - correction,
+            center[1] - correction,
+        )
+
+    @property
+    def my_bacteria_size(self) -> int:
+        return round(self.my_bacteria.radius * SCALE * 2)
+
     def on_resize(self, window: WindowSDL, width: int, height: int):
-        self._bacteria.pos = [round(window.size[0] / 2), round(window.size[1] / 2)]
+        self._bacteria.pos = self.my_bacteria_position
 
     async def update(self):
         async with self._lock:
@@ -262,10 +274,11 @@ class Game(Widget):
 
         self._grid.update()
         self._organism_collection.update()
-        my_bacteria = self._game_store.game_status.bacterias.get(self._game_store.player_id)
-        radius = my_bacteria.radius * SCALE
-        self._bacteria.size = (radius, radius)
-        self._bacteria.hue = my_bacteria.hsv[0]
+        my_bacteria = self.my_bacteria
+        size = self.my_bacteria_size
+        self._bacteria.size = (size, size)
+        self._bacteria.pos = self.my_bacteria_position
+        self._bacteria.hue = my_bacteria.hue
 
     def connect(self):
         create_task(self._connect())
@@ -343,3 +356,10 @@ class AgarApp(App):
 
 def main():
     run(AgarApp().async_run(async_lib="asyncio"))
+
+
+def _get_center() -> tuple[int, int]:
+    return (
+        round(_window.width / 2),
+        round(_window.height / 2)
+    )
