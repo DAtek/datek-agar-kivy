@@ -246,8 +246,6 @@ class Game(Widget):
         self._game_store = GameStore()
         self._grid = Grid(self._game_store)
         self._organism_collection = OrganismCollection(self._game_store)
-        self.add_widget(self._grid)
-        self.add_widget(self._organism_collection)
 
         self._client: UDPClient = ...
         self._bacteria = Bacteria(
@@ -260,8 +258,6 @@ class Game(Widget):
             MessageType.GAME_STATUS_UPDATE: self._handle_game_status_update,
             MessageType.CONNECT: self._handle_connect,
         }
-
-        self.add_widget(self._bacteria)
 
     @property
     def my_bacteria(self) -> Optional[BacteriaModel]:
@@ -360,6 +356,10 @@ class Game(Widget):
             world_size=message.world_size,
             total_nutrient=message.total_nutrient,
         )
+
+        self.add_widget(self._grid)
+        self.add_widget(self._organism_collection)
+        self.add_widget(self._bacteria)
 
         for widget in (
             self.button,
