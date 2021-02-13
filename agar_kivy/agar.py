@@ -1,6 +1,7 @@
 from asyncio import sleep, run, create_task, Lock
 from enum import IntEnum
 from math import ceil
+from socket import gethostbyname
 from typing import Callable, Optional
 
 import numpy as np
@@ -13,7 +14,8 @@ from agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_c
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.core.window.window_sdl2 import WindowSDL
-from kivy.properties import ObjectProperty, ObservableList, NumericProperty
+from kivy.properties import ObjectProperty, ObservableList, NumericProperty, StringProperty
+from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 
@@ -26,6 +28,16 @@ class ArrowKey(IntEnum):
 
 class Bacteria(Widget):
     hue = NumericProperty(0.5)
+    name = StringProperty("")
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._label = Label(text=self.name, pos=self.pos)
+        self.add_widget(self._label)
+
+    def change_pos(self, pos):
+        self.pos = pos
+        self._label.pos = pos
 
 
 class HorizontalLine(Widget):
@@ -130,16 +142,17 @@ class OrganismCollection(Widget):
         organism_widget = self._organisms.get(organism_id)
         pos = self._vector_array[index]
         pos = round(pos[0]), round(pos[1])
+        size = round(self._organism_sizes[index])
 
         if organism_widget:
-            organism_widget.pos = pos
+            organism_widget.change_pos(pos)
+            organism_widget.size = [size, size]
             return
 
         organism = self._total_organism_collection[organism_id]
-
-        hsv = getattr(organism, "hsv", [0.4])
-        size = round(self._organism_sizes[index])
-        organism_widget = Bacteria(pos=pos, size=[size, size], hue=hsv[0])
+        hue = getattr(organism, "hue", 0.4)
+        name = getattr(organism, "name", "")
+        organism_widget = Bacteria(pos=pos, size=[size, size], hue=hue, name=name)
         self.add_widget(organism_widget)
         self._organisms[organism_id] = organism_widget
 
@@ -217,6 +230,12 @@ class Grid(Widget):
 
 class Game(Widget):
     button = ObjectProperty(None)
+    player_name = ObjectProperty(None)
+    player_name_label = ObjectProperty(None)
+    host = ObjectProperty(None)
+    host_label = ObjectProperty(None)
+    port = ObjectProperty(None)
+    port_label = ObjectProperty(None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -312,11 +331,11 @@ class Game(Widget):
 
     async def _connect(self):
         self._client = UDPClient(
-            host="127.0.0.1",
-            port=9999,
+            host=gethostbyname(self.host.text),
+            port=int(self.port.text),
             handle_message=self._handle_message,
             ping_frequency_sec=0.5,
-            player_name="Atti"
+            player_name=self.player_name.text
         )
         self._client.start()
 
@@ -341,7 +360,17 @@ class Game(Widget):
             world_size=message.world_size,
             total_nutrient=message.total_nutrient,
         )
-        self.remove_widget(self.button)
+
+        for widget in (
+            self.button,
+            self.player_name,
+            self.player_name_label,
+            self.host,
+            self.host_label,
+            self.port,
+            self.port_label
+        ):
+            self.remove_widget(widget)
 
 
 class AgarApp(App):

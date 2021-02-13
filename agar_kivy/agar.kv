@@ -2,13 +2,56 @@
 
 <Game>:
     button: button_connect
+    player_name: input_player
+
+    host: input_host
+    port: input_port
+
+    host_label: label_host
+    port_label: label_port
+    player_name_label: label_player_name
+
+    TextInput:
+        id: input_player
+        pos: root.width * 0.5 - 40, root.height * 0.9 - 15
+        size: 150, 28
+
+    Label:
+        id: label_player_name
+        pos: root.width * 0.3, root.height * 0.9 - 15
+        size: 150, 28
+        text: "Player name"
+
+    TextInput:
+        id: input_host
+        pos: root.width * 0.5 - 40, root.height * 0.85 - 15
+        size: 150, 28
+
+    Label:
+        id: label_host
+        pos: root.width * 0.3, root.height * 0.85 - 15
+        size: 150, 28
+        text: "Host"
+
+    TextInput:
+        id: input_port
+        pos: root.width * 0.5 - 40, root.height * 0.8 - 15
+        size: 150, 28
+        text: "9582"
+
+    Label:
+        id: label_port
+        pos: root.width * 0.3, root.height * 0.8 - 15
+        size: 150, 28
+        text: "Port"
 
     Button:
-        pos: root.width * 0.5 - 40, root.height * 0.9 - 15
+        id: button_connect
+        pos: root.width * 0.5 - 40, root.height * 0.75 - 15
         size: 80, 30
         text: 'Connect'
         on_press: root.connect()
-        id: button_connect
+
 
     RelativeLayout:
         size: root.width, root.height
