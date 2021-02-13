@@ -61,18 +61,14 @@ class OrganismCollection(Widget):
         super().__init__(**kwargs)
         self._game_store = game_store
         self._organisms: dict[str, Bacteria] = {}
-        self._organism_positions = []
-        self._organism_radiuses = []
-        self._id_position_map = {}
-        self._total_organism_collection = {}
         self._vector_array: np.ndarray = ...
-        self._position_array: np.ndarray = ...
+        self._wanted_vector_array: np.ndarray = ...
         self._organism_sizes: np.ndarray = ...
+        self._organism_radiuses: list = []
+        self._init_registry()
 
     def update(self):
-        self._organism_positions = []
-        self._id_position_map = {}
-        self._organism_radiuses = []
+        self._init_registry()
 
         for bacteria in self._game_store.game_status.bacterias:
             if bacteria.id != self._game_store.player_id:
@@ -96,35 +92,44 @@ class OrganismCollection(Widget):
             organism_positions
         )
 
-        self._position_array = np.ndarray(organism_positions.shape, np.float32)
-        self._position_array[:] = np.array(_window.size, np.float32) / 2
         self._organism_radiuses = np.array(self._organism_radiuses, np.float32) * SCALE
         self._organism_sizes = self._organism_radiuses * 2
-        self._position_array += self._vector_array * SCALE
-        self._position_array = calculate_corrected_positions(self._position_array, self._organism_radiuses)
 
-        for id_ in self._id_position_map.keys():
-            self._update_organism(id_)
+        self._vector_array *= SCALE
+        self._vector_array[:] += np.array(_get_center(), np.float32)
+        self._vector_array = calculate_corrected_positions(self._vector_array, self._organism_radiuses)
+
+        found_1 = np.where(self._vector_array < [_window.width, _window.height])[0]
+        found_2 = np.where(self._vector_array > -100)[0]
+        indexes, index_counts = np.unique(np.concatenate((found_1, found_2)), return_counts=True)
+        wanted_indexes = indexes[index_counts > 3]
+
+        for index in wanted_indexes:
+            self._update_organism(index)
+
+        organisms_to_delete = set(self._organisms.keys()) - {self._index_organism_id_map[i] for i in wanted_indexes}
+
+        for id_ in organisms_to_delete:
+            self.remove_widget(self._organisms[id_])
+            del self._organisms[id_]
+
+    def _init_registry(self):
+        self._organism_positions = []
+        self._index_organism_id_map = {}
+        self._organism_radiuses = []
+        self._total_organism_collection = {}
 
     def _register_organism(self, organism: Organism):
         self._total_organism_collection[organism.id] = organism
         self._organism_positions.append(organism.position)
-        self._id_position_map[organism.id] = len(self._organism_positions) - 1
+        self._index_organism_id_map[len(self._organism_positions) - 1] = organism.id
         self._organism_radiuses.append(organism.radius)
 
-    def _update_organism(self, organism_id):
+    def _update_organism(self, index):
+        organism_id = self._index_organism_id_map[index]
         organism_widget = self._organisms.get(organism_id)
-        index = self._id_position_map[organism_id]
-        pos = self._position_array[index]
-        pos = [round(pos[0]), round(pos[1])]
-
-        if pos[0] > _window.size[0] or pos[1] > _window.size[1]:
-            if not organism_widget:
-                return
-
-            self.remove_widget(organism_widget)
-            del self._organisms[organism_id]
-            return
+        pos = self._vector_array[index]
+        pos = round(pos[0]), round(pos[1])
 
         if organism_widget:
             organism_widget.pos = pos
@@ -342,7 +347,7 @@ class Game(Widget):
 class AgarApp(App):
     def build(self):
         game = Game()
-        refresh_frequency = 1 / 35
+        refresh_frequency = 1 / 50
 
         @run_forever
         async def update_game():
