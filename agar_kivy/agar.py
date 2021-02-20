@@ -330,7 +330,7 @@ class Game(Widget):
             host=gethostbyname(self.host.text),
             port=int(self.port.text),
             handle_message=self._handle_message,
-            ping_frequency_sec=0.5,
+            ping_interval_sec=0.5,
             player_name=self.player_name.text
         )
         self._client.start()
