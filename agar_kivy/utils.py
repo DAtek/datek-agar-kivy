@@ -1,6 +1,6 @@
 import numpy as np
 
-SCALE = 30
+SCALE = 60
 DOUBLE_SCALE = 2 * SCALE
 INITIAL_SIZE = 30
 INITIAL_CORRECTION = round(-INITIAL_SIZE / 2)
