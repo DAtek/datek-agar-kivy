@@ -1,6 +1,6 @@
 from asyncio import sleep, run, create_task, Lock
 from enum import IntEnum
-from math import ceil
+from math import ceil, pi
 from socket import gethostbyname
 from typing import Callable, Optional
 
@@ -17,6 +17,9 @@ from kivy.core.window.window_sdl2 import WindowSDL
 from kivy.properties import ObjectProperty, ObservableList, NumericProperty, StringProperty
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
+
+
+DOUBLE_PI = 2 * pi
 
 
 class ArrowKey(IntEnum):
@@ -55,7 +58,7 @@ class GameStore:
     def __init__(self):
         self.player_id = 0
         self.positions: dict[str, np.ndarray] = {}
-        self.speed_percentage = [0, 0]
+        self.speed_polar_coordinated = [0.0, 0.0]
         self.game_status: GameStatus = GameStatus()
         self.universe: Universe = ...
 
@@ -312,16 +315,16 @@ class Game(Widget):
         except ValueError:
             return
 
-        speed = self._game_store.speed_percentage
+        speed = self._game_store.speed_polar_coordinated
 
         if key == ArrowKey.UP:
-            speed[1] = min([1, speed[1] + 0.1])
-        elif key == ArrowKey.DOWN:
-            speed[1] = max([-1, speed[1] - 0.1])
-        elif key == ArrowKey.LEFT:
-            speed[0] = max([-1, speed[0] - 0.1])
-        elif key == ArrowKey.RIGHT:
             speed[0] = min([1, speed[0] + 0.1])
+        elif key == ArrowKey.DOWN:
+            speed[0] = max([0, speed[0] - 0.1])
+        elif key == ArrowKey.LEFT:
+            speed[1] = max([(speed[1] + 0.05) % DOUBLE_PI])
+        elif key == ArrowKey.RIGHT:
+            speed[1] = min([(speed[1] - 0.05) % DOUBLE_PI])
 
         self._client.change_speed((speed[0], speed[1]))
 
@@ -376,7 +379,7 @@ class Game(Widget):
 class AgarApp(App):
     def build(self):
         game = Game()
-        refresh_frequency = 1 / 50
+        refresh_frequency = 1 / 60
 
         @run_forever
         async def update_game():
