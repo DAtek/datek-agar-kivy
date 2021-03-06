@@ -5,7 +5,7 @@ description = "Kivy client for Agar game"
 authors = ["Attila Dudas <dudasa7@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-repository = "https://gitlab.com/datek-agar/agar-core"
+repository = "https://gitlab.com/datek-agar/agar-kivy"
 
 [tool.poetry.scripts]
 agar-kivy = 'datek_agar_kivy.agar:main'
