@@ -1,17 +1,19 @@
 [tool.poetry]
-name = "agar-kivy"
-version = "0.1.0"
+name = "datek-agar-kivy"
+version = "0.0.0"
 description = "Kivy client for Agar game"
-authors = ["DAtek <dudasa7@gmail.com>"]
+authors = ["Attila Dudas <dudasa7@gmail.com>"]
 license = "MIT"
+readme = "README.md"
+repository = "https://gitlab.com/datek-agar/agar-core"
 
 [tool.poetry.scripts]
-agar-kivy = 'agar_kivy.agar:main'
+agar-kivy = 'datek_agar_kivy.agar:main'
 
 [tool.poetry.dependencies]
 python = "^3.9"
-Kivy = {extras = ["base"], version = "^2.0.0"}
 numpy = "^1.20.0"
+Kivy = "^2.0.0"
 
 [tool.poetry.dev-dependencies]
 

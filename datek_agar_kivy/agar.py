@@ -10,7 +10,7 @@ from datek_agar_core.network.client import UDPClient
 from datek_agar_core.network.message import Message, MessageType
 from datek_agar_core.universe import Universe
 from datek_agar_core.utils import run_forever
-from agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_corrected_positions
+from datek_agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_corrected_positions
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.core.window.window_sdl2 import WindowSDL

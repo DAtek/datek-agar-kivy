@@ -8,5 +8,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - Show a message and display starting layout when player was eaten.
  - Display scale should change with the player's size.
  
-
-## [0.1.0] - 1000.01.01 
