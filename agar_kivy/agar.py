@@ -5,11 +5,11 @@ from socket import gethostbyname
 from typing import Callable, Optional
 
 import numpy as np
-from agar_core.game import GameStatus, Organism, Bacteria as BacteriaModel
-from agar_core.network.client import UDPClient
-from agar_core.network.message import Message, MessageType
-from agar_core.universe import Universe
-from agar_core.utils import run_forever
+from datek_agar_core.game import GameStatus, Organism, Bacteria as BacteriaModel
+from datek_agar_core.network.client import UDPClient
+from datek_agar_core.network.message import Message, MessageType
+from datek_agar_core.universe import Universe
+from datek_agar_core.utils import run_forever
 from agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_corrected_positions
 from kivy.app import App
 from kivy.core.window import Window
