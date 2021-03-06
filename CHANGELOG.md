@@ -9,4 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - Display scale should change with the player's size.
  
 
+## [0.1.1] - 2021-03-06
+### Fixed
+- Repository url in in pyproject.toml
+
 ## [0.1.0] - 2021-03-06
