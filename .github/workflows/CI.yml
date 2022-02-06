@@ -16,4 +16,4 @@ jobs:
       - name: Black
         run: |
           source .venv/bin/activate
-          black datek_agar_kivy/ tests/ --check
+          black datek_agar_kivy/ --check
