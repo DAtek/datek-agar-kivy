@@ -10,11 +10,21 @@ from datek_agar_core.network.client import UDPClient
 from datek_agar_core.network.message import Message, MessageType
 from datek_agar_core.universe import Universe
 from datek_agar_core.utils import run_forever
-from datek_agar_kivy.utils import SCALE, INITIAL_SIZE, INITIAL_CORRECTION, calculate_corrected_positions
+from datek_agar_kivy.utils import (
+    SCALE,
+    INITIAL_SIZE,
+    INITIAL_CORRECTION,
+    calculate_corrected_positions,
+)
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.core.window.window_sdl2 import WindowSDL
-from kivy.properties import ObjectProperty, ObservableList, NumericProperty, StringProperty
+from kivy.properties import (
+    ObjectProperty,
+    ObservableList,
+    NumericProperty,
+    StringProperty,
+)
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
@@ -98,13 +108,14 @@ class OrganismCollection(Widget):
         organism_positions = np.array(self._organism_positions, np.float32)
 
         origo_position = np.array(
-            self._game_store.game_status.get_bacteria_by_id(self._game_store.player_id).position,
-            np.float32
+            self._game_store.game_status.get_bacteria_by_id(
+                self._game_store.player_id
+            ).position,
+            np.float32,
         )
 
         self._vector_array = self._game_store.universe.calculate_position_vector_array(
-            origo_position,
-            organism_positions
+            origo_position, organism_positions
         )
 
         self._organism_radiuses = np.array(self._organism_radiuses, np.float32) * SCALE
@@ -112,17 +123,23 @@ class OrganismCollection(Widget):
 
         self._vector_array *= SCALE
         self._vector_array[:] += np.array(_get_center(), np.float32)
-        self._vector_array = calculate_corrected_positions(self._vector_array, self._organism_radiuses)
+        self._vector_array = calculate_corrected_positions(
+            self._vector_array, self._organism_radiuses
+        )
 
         found_1 = np.where(self._vector_array < [_window.width, _window.height])[0]
         found_2 = np.where(self._vector_array > -100)[0]
-        indexes, index_counts = np.unique(np.concatenate((found_1, found_2)), return_counts=True)
+        indexes, index_counts = np.unique(
+            np.concatenate((found_1, found_2)), return_counts=True
+        )
         wanted_indexes = indexes[index_counts > 3]
 
         for index in wanted_indexes:
             self._update_organism(index)
 
-        organisms_to_delete = set(self._organisms.keys()) - {self._index_organism_id_map[i] for i in wanted_indexes}
+        organisms_to_delete = set(self._organisms.keys()) - {
+            self._index_organism_id_map[i] for i in wanted_indexes
+        }
 
         for id_ in organisms_to_delete:
             self.remove_widget(self._organisms[id_])
@@ -190,10 +207,12 @@ class Grid(Widget):
     def update(self):
         self._previous_position = self._actual_position
         self._actual_position = self._game_store.actual_position
-        vector = self._game_store.universe.calculate_position_vector_array(
-            self._previous_position,
-            self._actual_position
-        ) * SCALE
+        vector = (
+            self._game_store.universe.calculate_position_vector_array(
+                self._previous_position, self._actual_position
+            )
+            * SCALE
+        )
 
         self._vector += vector
 
@@ -252,9 +271,7 @@ class Game(Widget):
 
         self._client: UDPClient = ...
         self._bacteria = Bacteria(
-            pos=self.my_bacteria_position,
-            size=[INITIAL_SIZE, INITIAL_SIZE],
-            hue=0.5
+            pos=self.my_bacteria_position, size=[INITIAL_SIZE, INITIAL_SIZE], hue=0.5
         )
 
         self._message_handlers: dict[MessageType, Callable[[Message], ...]] = {
@@ -264,7 +281,9 @@ class Game(Widget):
 
     @property
     def my_bacteria(self) -> Optional[BacteriaModel]:
-        return self._game_store.game_status.get_bacteria_by_id(self._game_store.player_id)
+        return self._game_store.game_status.get_bacteria_by_id(
+            self._game_store.player_id
+        )
 
     @property
     def my_bacteria_position(self) -> tuple[int, int]:
@@ -306,7 +325,14 @@ class Game(Widget):
     def connect(self):
         create_task(self._connect())
 
-    def on_key_down(self, window: WindowSDL, keyboard: int, keycode: int, something, observables: ObservableList):
+    def on_key_down(
+        self,
+        window: WindowSDL,
+        keyboard: int,
+        keycode: int,
+        something,
+        observables: ObservableList,
+    ):
         if self._client is ... or not self._client.player_id:
             return
 
@@ -334,7 +360,7 @@ class Game(Widget):
             port=int(self.port.text),
             handle_message=self._handle_message,
             ping_interval_sec=0.5,
-            player_name=self.player_name.text
+            player_name=self.player_name.text,
         )
         self._client.start()
 
@@ -371,7 +397,7 @@ class Game(Widget):
             self.host,
             self.host_label,
             self.port,
-            self.port_label
+            self.port_label,
         ):
             self.remove_widget(widget)
 
@@ -396,7 +422,4 @@ def main():
 
 
 def _get_center() -> tuple[int, int]:
-    return (
-        round(_window.width / 2),
-        round(_window.height / 2)
-    )
+    return (round(_window.width / 2), round(_window.height / 2))
