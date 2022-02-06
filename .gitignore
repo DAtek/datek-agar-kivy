@@ -1,5 +1,6 @@
 /.idea
 *.pyc
+.venv/
 .coverage
 dist/
 .pytest_cache/
